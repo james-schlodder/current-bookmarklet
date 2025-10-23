@@ -114,7 +114,7 @@ document.addEventListener('DOMContentLoaded', function() {
         html += escapeHtml(publication);
       }
       if (author) {
-        if (publication) html += '&middot;&nbsp;';
+        if (publication) html += '&nbsp;&middot;&nbsp;';
         html += escapeHtml(author);
       }
       if (date) {
