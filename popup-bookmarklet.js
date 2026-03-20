@@ -89,6 +89,51 @@ document.addEventListener('DOMContentLoaded', function() {
     if (history.replaceState) {
       history.replaceState(null, '', window.location.pathname);
     }
+
+    // Look up publication name from CSV (the popup page can fetch it freely)
+    if (hashData.url) {
+      fetch('currentpublications.csv')
+        .then(function(response) { return response.text(); })
+        .then(function(csvText) {
+          var lines = csvText.trim().split('\n');
+          var mappings = {};
+          for (var i = 1; i < lines.length; i++) {
+            var line = lines[i].trim();
+            if (!line) continue;
+            var commaIndex = line.indexOf(',');
+            if (commaIndex === -1) continue;
+            var urlPattern = line.substring(0, commaIndex).trim()
+              .replace(/^https?:\/\//, '').replace(/^www\./, '');
+            var pub = line.substring(commaIndex + 1).trim().replace(/,+/g, '').trim();
+            if (urlPattern && pub) mappings[urlPattern] = pub;
+          }
+
+          // Extract hostname + path from the article URL
+          try {
+            var articleUrl = new URL(hashData.url);
+            var hostname = articleUrl.hostname.replace(/^www\./, '');
+            var fullPath = hostname + articleUrl.pathname;
+
+            // Sort patterns longest-first so specific paths win
+            var patterns = Object.keys(mappings).sort(function(a, b) { return b.length - a.length; });
+            for (var i = 0; i < patterns.length; i++) {
+              if (fullPath.startsWith(patterns[i])) {
+                publicationInput.value = sanitizeText(mappings[patterns[i]]);
+                generateHTML();
+                return;
+              }
+            }
+            // Try hostname-only match
+            if (mappings[hostname]) {
+              publicationInput.value = sanitizeText(mappings[hostname]);
+              generateHTML();
+            }
+          } catch (e) {
+            console.warn('Publication lookup failed:', e);
+          }
+        })
+        .catch(function(err) { console.warn('Could not load CSV:', err); });
+    }
   } else {
     // Normal iframe mode — request data from parent
     window.parent.postMessage({ action: 'extractPage' }, '*');
