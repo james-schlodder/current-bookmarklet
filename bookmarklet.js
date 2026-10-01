@@ -209,11 +209,19 @@
     }
   }
 
+  // JSON-LD entries by @id, filled in by getJsonLd()
+  let jsonLdById = {};
+
   // Parse all JSON-LD blocks on the page and return the best article entry.
   // Article types are preferred; a generic WebPage entry is only used if no
   // article entry exists (WebPage often appears first but lacks author/date).
   function getJsonLd() {
-    const ARTICLE_TYPES = ['NewsArticle', 'Article', 'ReportageNewsArticle', 'BlogPosting'];
+    const ARTICLE_TYPES = [
+      'NewsArticle', 'Article', 'ReportageNewsArticle', 'BlogPosting',
+      'AnalysisNewsArticle', 'OpinionNewsArticle', 'BackgroundNewsArticle',
+      'ReviewNewsArticle', 'AskPublicNewsArticle', 'LiveBlogPosting',
+      'SocialMediaPosting', 'TechArticle', 'ScholarlyArticle', 'Report'
+    ];
     const items = [];
     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
     for (const script of scripts) {
@@ -230,6 +238,12 @@
         // Malformed JSON-LD — skip
       }
     }
+
+    // Remember every entry with an @id so author references can be followed
+    jsonLdById = {};
+    items.forEach(function(item) {
+      if (item && typeof item['@id'] === 'string') jsonLdById[item['@id']] = item;
+    });
 
     function typesOf(item) {
       const type = (item && item['@type']) || '';
@@ -270,7 +284,12 @@
     const authors = Array.isArray(authorField) ? authorField : [authorField];
     const names = authors.map(a => {
       if (typeof a === 'string') return isUrl(a) ? '' : a.trim().replace(/,+$/, '');
-      if (typeof a === 'object' && a.name) return isUrl(a.name) ? '' : a.name.trim().replace(/,+$/, '');
+      // Some sites (often WordPress) only reference the author by @id —
+      // look up the full entry elsewhere on the page to get the name
+      if (a && typeof a === 'object' && !a.name && typeof a['@id'] === 'string' && jsonLdById[a['@id']]) {
+        a = jsonLdById[a['@id']];
+      }
+      if (a && typeof a === 'object' && typeof a.name === 'string') return isUrl(a.name) ? '' : a.name.trim().replace(/,+$/, '');
       return '';
     }).filter(Boolean);
     return names.join(', ');
@@ -343,19 +362,25 @@
       'Jan.', 'Feb.', 'Mar.', 'Apr.', 'Jun.', 'Jul.', 'Aug.',
       'Sep.', 'Sept.', 'Oct.', 'Nov.', 'Dec.',
       'St.', 'Ave.', 'Blvd.', 'Rd.', 'Dept.', 'Est.', 'Vol.',
-      'No.', 'Approx.'
+      'No.', 'Approx.', 'a.m.', 'p.m.'
     ];
 
     let safe = text;
     abbreviations.forEach(function(abbr) {
       const escaped = abbr.replace(/\./g, '\\.');
-      safe = safe.replace(new RegExp(escaped, 'g'), abbr.replace(/\./g, PLACEHOLDER));
+      // \b so "Co." doesn't match the end of a longer word
+      safe = safe.replace(new RegExp('\\b' + escaped, 'g'), abbr.replace(/\./g, PLACEHOLDER));
     });
 
     // Protect decimal numbers (e.g. "$3.5 billion")
     safe = safe.replace(/(\d)\.(\d)/g, '$1' + PLACEHOLDER + '$2');
 
-    const parts = safe.split(/(?<=[.!?])\s+/);
+    // Protect middle initials (e.g. "John F. Kennedy", "J.P. Morgan")
+    safe = safe.replace(/(^|[\s(.\x00])([A-Z])\.(?=\s+[A-Z])/g, '$1$2' + PLACEHOLDER);
+
+    // Split after . ! ? — also when the sentence ends inside a quote or
+    // parenthesis (e.g. 'he said." The'), as long as a new sentence follows
+    const parts = safe.split(/(?<=[.!?])\s+|(?<=[.!?]["'”’)]+)\s+(?=["“]?[A-Z0-9])/);
     const result = parts.slice(0, count).join(' ');
     return result.replace(/\x00/g, '.');
   }
@@ -539,21 +564,40 @@
     // -------------------------------------------------------------------------
     let author = '';
 
+    // Clean up an author candidate: drop URLs, a leading "By", and names that
+    // are just the publication (e.g. author "Utility Dive" on Utility Dive)
+    const normalize = str => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+    function cleanAuthor(name) {
+      if (!name) return '';
+      name = String(name).trim().replace(/^by\s+/i, '').trim();
+      if (!name || isUrl(name)) return '';
+      if (normalize(name) && normalize(name) === normalize(publication)) return '';
+      return name;
+    }
+
     if (jsonLd && jsonLd.author) {
-      author = parseJsonLdAuthor(jsonLd.author);
+      author = cleanAuthor(parseJsonLdAuthor(jsonLd.author));
     }
 
     if (!author) {
       const authorMeta = document.querySelector('meta[name="author"]');
-      if (authorMeta && authorMeta.content && !isUrl(authorMeta.content)) {
-        author = authorMeta.content.trim();
-      }
+      if (authorMeta && authorMeta.content) author = cleanAuthor(authorMeta.content);
     }
 
     if (!author) {
       const articleAuthor = document.querySelector('meta[property="article:author"]');
-      if (articleAuthor && articleAuthor.content && !isUrl(articleAuthor.content)) {
-        author = articleAuthor.content.trim();
+      if (articleAuthor && articleAuthor.content) author = cleanAuthor(articleAuthor.content);
+    }
+
+    if (!author) {
+      // Author tags added by Parse.ly, the NYT ("byl"), Sailthru, and Dublin Core
+      const otherAuthorMeta = document.querySelectorAll(
+        'meta[name="parsely-author"], meta[name="byl"], meta[name="sailthru.author"], ' +
+        'meta[name="dc.creator"], meta[name="DC.creator"]'
+      );
+      for (const m of otherAuthorMeta) {
+        author = cleanAuthor(m.content);
+        if (author) break;
       }
     }
 
@@ -565,7 +609,7 @@
         '[class*="authorName"], [class*="AuthorName"], ' +
         '[data-testid="author-name"]'
       );
-      if (byline) author = byline.textContent.trim();
+      if (byline) author = cleanAuthor(byline.textContent);
     }
 
     // Site-specific author fallbacks
@@ -577,6 +621,7 @@
     // Convert ALL CAPS author names to Title Case (e.g. "RIO YAMAT" → "Rio Yamat")
     if (author && author === author.toUpperCase() && author.length > 1) {
       author = author.replace(/\b\w+/g, function(w) {
+        if (w === 'AND') return 'and';
         return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
       });
     }
@@ -604,6 +649,20 @@
       const itempropDate = document.querySelector('[itemprop="datePublished"]');
       if (itempropDate) {
         date = formatDate(itempropDate.getAttribute('content') || itempropDate.getAttribute('datetime') || itempropDate.textContent);
+      }
+    }
+
+    if (!date) {
+      // Publish-date tags added by Parse.ly, Sailthru, Dublin Core, and others
+      const otherDateMeta = document.querySelectorAll(
+        'meta[name="article:published_time"], meta[property="og:article:published_time"], ' +
+        'meta[name="parsely-pub-date"], meta[name="pubdate"], meta[name="publish-date"], ' +
+        'meta[name="publishdate"], meta[name="sailthru.date"], meta[name="dc.date.issued"], ' +
+        'meta[name="DC.date.issued"], meta[name="date"]'
+      );
+      for (const m of otherDateMeta) {
+        date = formatDate(m.content);
+        if (date) break;
       }
     }
 

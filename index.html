@@ -339,6 +339,9 @@
         return dt.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
       }
 
+      /* JSON-LD entries by @id, so author references can be followed */
+      var byId = {};
+
       /* Best article entry from the page's JSON-LD structured data */
       function getJsonLd() {
         var items = [];
@@ -360,7 +363,14 @@
           for (var k = 0; k < t.length; k++) if (names.indexOf(t[k]) > -1) return true;
           return false;
         }
-        var articleTypes = ['NewsArticle', 'Article', 'ReportageNewsArticle', 'BlogPosting'];
+        byId = {};
+        for (var i = 0; i < items.length; i++) {
+          if (items[i] && typeof items[i]['@id'] === 'string') byId[items[i]['@id']] = items[i];
+        }
+        var articleTypes = ['NewsArticle', 'Article', 'ReportageNewsArticle', 'BlogPosting',
+          'AnalysisNewsArticle', 'OpinionNewsArticle', 'BackgroundNewsArticle', 'ReviewNewsArticle',
+          'AskPublicNewsArticle', 'LiveBlogPosting', 'SocialMediaPosting', 'TechArticle',
+          'ScholarlyArticle', 'Report'];
         for (var i = 0; i < items.length; i++) if (hasType(items[i], articleTypes)) return items[i];
         for (var i = 0; i < items.length; i++) if (hasType(items[i], ['WebPage'])) return items[i];
         return null;
@@ -414,8 +424,10 @@
           var list = Array.isArray(ld.author) ? ld.author : [ld.author];
           var names = [];
           for (var i = 0; i < list.length; i++) {
-            var n = typeof list[i] === 'string' ? list[i] : (list[i] && list[i].name) || '';
-            n = String(n).trim().replace(/,+$/, '');
+            var ai = list[i];
+            if (ai && typeof ai === 'object' && !ai.name && byId[ai['@id']]) ai = byId[ai['@id']];
+            var n = typeof ai === 'string' ? ai : (ai && ai.name) || '';
+            n = String(n).trim().replace(/,+$/, '').replace(/^by\s+/i, '');
             if (n && !isUrl(n)) names.push(n);
           }
           author = names.join(', ');
@@ -425,8 +437,9 @@
           if (am && !isUrl(am)) author = am;
         }
         if (!author) author = text(document.querySelector('[rel="author"], [class*="author-name"], [class*="authorName"]'));
+        author = author.replace(/^by\s+/i, '').trim();
         if (author && author === author.toUpperCase() && author.length > 1) {
-          author = author.toLowerCase().replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+          author = author.toLowerCase().replace(/\b\w/g, function(c) { return c.toUpperCase(); }).replace(/\bAnd\b/g, 'and');
         }
 
         var date = '';
@@ -467,6 +480,10 @@
         if (!publication) publication = meta('meta[property="og:site_name"]');
         if (!publication) publication = location.hostname.replace(/^www\./, '');
         publication = publication.replace(/,+/g, '').trim();
+
+        /* Don't use the publication's own name as the author */
+        var squash = function(v) { return v.toLowerCase().replace(/[^a-z0-9]/g, ''); };
+        if (author && squash(author) === squash(publication)) author = '';
 
         /* Strip a trailing site name from the headline ("Headline | Utility Dive") */
         var sm = headline.match(/^(.+)\s+[\|\-–—]{1,2}\s+([^|–—]+)$/);
