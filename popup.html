@@ -249,6 +249,15 @@
       border: 1px solid #fca5a5;
       display: block;
     }
+
+    .status.warning {
+      background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+      color: #92400e;
+      border: 1px solid #fcd34d;
+      display: block;
+      position: relative;
+      z-index: 1;
+    }
     
     .output {
       margin-top: 20px;
@@ -387,6 +396,8 @@
     </div>
     
     <div id="status" class="status"></div>
+
+    <div id="charWarning" class="status"></div>
     
     <div id="output" class="output"></div>
   </div>

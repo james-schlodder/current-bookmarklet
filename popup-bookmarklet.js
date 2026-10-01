@@ -38,9 +38,66 @@ document.addEventListener('DOMContentLoaded', function() {
   // ---------------------------------------------------------------------------
   const INVISIBLE_CHARS_REGEX = /[\u200B-\u200D\u2060\uFEFF\u00AD\u180E\u2028\u2029]/g;
 
-  function sanitizeText(text) {
+  function stripInvisible(text) {
     if (!text) return text;
     return text.replace(INVISIBLE_CHARS_REGEX, '');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Email-safe characters
+  // Higher Logic sends emails in an older encoding (ISO-8859-1 / Windows-1252).
+  // Any character outside that set becomes "?" in the sent email, even though
+  // it looks fine in the Higher Logic editor. Tested Oct 2026: dashes, curly
+  // quotes, accented letters, \u2026 \u2022 \u20AC \u2122 all come through fine; the minus sign
+  // (USA Today uses it as a dash) and invisible characters do not.
+  // Characters outside the set are swapped for a safe look-alike here.
+  // ---------------------------------------------------------------------------
+  const WINDOWS_1252_EXTRAS = '\u20AC\u201A\u0192\u201E\u2026\u2020\u2021\u02C6\u2030\u0160\u2039\u0152\u017D\u2018\u2019\u201C\u201D\u2022\u2013\u2014\u02DC\u2122\u0161\u203A\u0153\u017E\u0178';
+
+  const SAFE_REPLACEMENTS = {
+    '\u2010': '-', '\u2011': '-', '\u2043': '-', '\uFE63': '-', '\uFF0D': '-',  // hyphens
+    '\u2012': '\u2013',                                                             // figure dash
+    '\u2015': '\u2014', '\u2E3A': '\u2014', '\u2E3B': '\u2014', '\uFE58': '\u2014',                 // long dashes
+    '\u201B': '\u2018', '\u201F': '\u201C', '\u02BC': '\u2019', '\u2032': "'", '\u2033': '"',  // quotes/primes
+    '\u2024': '.', '\u2027': '\u00B7', '\u2219': '\u00B7', '\u22C5': '\u00B7',                 // dots
+    '\u2044': '/', '\u2215': '/',                                              // slashes
+    '\u0141': 'L', '\u0142': 'l', '\u0110': 'D', '\u0111': 'd', '\u0126': 'H', '\u0127': 'h', '\u0131': 'i'       // letters with no plain form
+  };
+
+  function isEmailSafe(ch) {
+    const code = ch.codePointAt(0);
+    return code < 0x80 || (code >= 0xA0 && code <= 0xFF) || WINDOWS_1252_EXTRAS.indexOf(ch) !== -1;
+  }
+
+  function makeEmailSafe(text) {
+    if (!text) return text;
+
+    // Minus sign: used as a dash between spaces ("companies \u2212 including"),
+    // otherwise it's a real minus ("\u22125 degrees") and becomes a hyphen
+    text = text.replace(/(\s)\u2212(?=\s)/g, '$1\u2014').replace(/\u2212/g, '-');
+
+    // Unusual spaces (thin, narrow, em space, etc.) become a normal space
+    text = text.replace(/[\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
+
+    return Array.from(text).map(function(ch) {
+      if (isEmailSafe(ch)) return ch;
+      if (SAFE_REPLACEMENTS[ch]) return SAFE_REPLACEMENTS[ch];
+      // Rare accented letters, ligatures and full-width characters: use the
+      // plain version (e.g. "\u014D" -> "o", "\uFB01" -> "fi") if that is email-safe
+      const plain = ch.normalize('NFKD').replace(/[\u0300-\u036F]/g, '');
+      if (plain && Array.from(plain).every(isEmailSafe)) return plain;
+      // No safe look-alike (e.g. emoji): leave it \u2014 a warning is shown
+      return ch;
+    }).join('');
+  }
+
+  // Characters that will still turn into "?" (shown as a warning)
+  function findUnsafeChars(text) {
+    return Array.from(text || '').filter(function(ch) { return !isEmailSafe(ch); });
+  }
+
+  function sanitizeText(text) {
+    return makeEmailSafe(stripInvisible(text));
   }
 
   // ---------------------------------------------------------------------------
@@ -60,7 +117,7 @@ document.addEventListener('DOMContentLoaded', function() {
   if (hashData) {
     // CSP fallback mode — pre-fill from URL hash data
     headlineInput.value    = titleCase(sanitizeText(hashData.headline    || ''));
-    urlInput.value         = sanitizeText(hashData.url         || '');
+    urlInput.value         = stripInvisible(hashData.url         || '');
     publicationInput.value = sanitizeText(hashData.publication || '');
     authorInput.value      = sanitizeText(hashData.author      || '');
     dateInput.value        = sanitizeText(hashData.date        || '');
@@ -132,7 +189,7 @@ document.addEventListener('DOMContentLoaded', function() {
       const data = event.data.data;
 
       headlineInput.value    = titleCase(sanitizeText(data.headline    || ''));
-      urlInput.value         = sanitizeText(data.url         || '');
+      urlInput.value         = stripInvisible(data.url         || '');
       publicationInput.value = sanitizeText(data.publication || '');
       authorInput.value      = sanitizeText(data.author      || '');
       dateInput.value        = sanitizeText(data.date        || '');
@@ -152,7 +209,7 @@ document.addEventListener('DOMContentLoaded', function() {
     input.addEventListener('paste', function() {
       const self = this;
       setTimeout(function() {
-        const cleaned = sanitizeText(self.value);
+        const cleaned = self === urlInput ? stripInvisible(self.value) : sanitizeText(self.value);
         if (cleaned !== self.value) {
           self.value = cleaned;
           generateHTML();
@@ -203,7 +260,8 @@ document.addEventListener('DOMContentLoaded', function() {
   // ---------------------------------------------------------------------------
   function generateHTML() {
     const headline    = titleCase(sanitizeText(headlineInput.value.trim()));
-    const url         = sanitizeText(urlInput.value.trim());
+    // Any non-ASCII character in the link is percent-encoded (the link still works)
+    const url         = stripInvisible(urlInput.value.trim()).replace(/[^\x00-\x7F]/gu, encodeURIComponent);
     const publication = sanitizeText(publicationInput.value.trim());
     const author      = sanitizeText(authorInput.value.trim());
     const date        = sanitizeText(dateInput.value.trim());
@@ -260,6 +318,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     output.textContent = html;
+    showCharWarning(findUnsafeChars(headline + publication + author + date + summary));
     output.classList.add('show');
     copyBtn.disabled = false;
   }
@@ -316,6 +375,20 @@ document.addEventListener('DOMContentLoaded', function() {
     return div.innerHTML;
   }
   
+  // Warn about characters that will show as "?" in the sent email
+  function showCharWarning(chars) {
+    const warning = document.getElementById('charWarning');
+    if (!chars.length) {
+      warning.className = 'status';
+      warning.textContent = '';
+      return;
+    }
+    const unique = chars.filter(function(ch, i) { return chars.indexOf(ch) === i; });
+    warning.textContent = '⚠ These characters may show as "?" in the email: ' + unique.join(' ') +
+      ' — consider editing them out.';
+    warning.className = 'status warning';
+  }
+
   function showStatus(message, type) {
     status.textContent = message;
     status.className = 'status ' + type;
