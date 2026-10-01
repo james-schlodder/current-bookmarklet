@@ -9,14 +9,6 @@
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
   
-  <!-- Google Analytics -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-WMSPQVX00W"></script>
-  <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', 'G-WMSPQVX00W');
-  </script>
   <style>
     * {
       margin: 0;
@@ -196,7 +188,7 @@
       <h2>🚀 Get Started</h2>
       <p><strong>Drag this button to your bookmarks bar:</strong></p>
       <p style="text-align: center; margin: 30px 0;">
-        <a href="javascript:void(function(){if(location.hostname.indexOf('capitaliq.spglobal.com')>-1){try{var h=(document.querySelector('h1')||{}).textContent||document.title;h=h?h.trim():'';var au='',date='',sum='';var h1=document.querySelector('h1');if(h1&&h1.parentElement&&h1.parentElement.children[1]){var t=h1.parentElement.children[1].textContent.trim();var bi=t.indexOf(String.fromCharCode(8226));if(bi>0)au=t.substring(0,bi).trim()}var st=document.querySelectorAll('.spg-text');for(var i=0;i<st.length;i++){var t=st[i].textContent.trim();var dm=t.match(/((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})/);if(dm){var dt=new Date(dm[1]);if(!isNaN(dt)){date=dt.toLocaleDateString('en-US',{month:'short',day:'2-digit',year:'numeric'});break}}}var ps=document.querySelectorAll('p');var sp=[];for(var i=0;i<ps.length;i++){var t=ps[i].textContent.trim();if(t.length>80&&t.indexOf('This article was published')===-1){sp.push(t);if(sp.length>=2)break}}if(sp.length>0)sum=sp.join(' ');var d={headline:h,url:location.href,publication:'S'+String.fromCharCode(38)+'P Global',author:au,date:date,summary:sum};var u='https://james-schlodder.github.io/current-bookmarklet/popup.html'+String.fromCharCode(35)+'data='+encodeURIComponent(JSON.stringify(d));var o=document.createElement('div');o.style.cssText='position:fixed;top:0;left:0;right:0;z-index:999999;background:rgb(74,159,181);padding:14px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,0.3);font-family:Arial,sans-serif';var a=document.createElement('a');a.href=u;a.target='_blank';a.textContent='Click here to open The Current in a new tab';a.style.cssText='color:white;font-size:16px;font-weight:bold;text-decoration:underline';var b=document.createElement('button');b.textContent=String.fromCharCode(10005);b.style.cssText='background:none;border:none;color:white;font-size:20px;cursor:pointer;margin-left:16px;vertical-align:middle';b.addEventListener('click',function(){o.remove()});o.appendChild(a);o.appendChild(b);document.body.appendChild(o)}catch(e){alert('The Current: '+e.message)}}else{var s=document.createElement('script');s.src='https://james-schlodder.github.io/current-bookmarklet/bookmarklet.js';document.head.appendChild(s)}}());" class="bookmarklet-button">The Current</a>
+        <a href="#" id="bookmarklet-link" class="bookmarklet-button">The Current</a>
       </p>
       <p style="font-size: 14px; color: #64748b; text-align: center;">👆 Drag this button to your bookmarks bar</p>
     </div>
@@ -284,5 +276,246 @@
       <p>Built with ❤️ for journalists, researchers, and content curators</p>
     </div>
   </div>
+  <script>
+    // -------------------------------------------------------------------------
+    // The bookmark code
+    // This function is what runs when someone clicks "The Current" in their
+    // bookmarks bar. The button above is built from it automatically when this
+    // page loads, so edit it here (not in the button). Anyone who installed the
+    // bookmark before a change here needs to drag the button again to get it;
+    // changes to bookmarklet.js reach everyone automatically.
+    //
+    // Note: use /* */ comments inside the function, not //.
+    // -------------------------------------------------------------------------
+    function currentBookmark() {
+      var BASE = 'https://james-schlodder.github.io/current-bookmarklet/';
+      var SCRIPT_TIMEOUT_MS = 4000;
+      var done = false;
+
+      /* Blue banner at the top of the page linking to The Current in a new tab,
+         with the extracted article data carried in the link */
+      function showBanner(d) {
+        var old = document.getElementById('current-bookmarklet-banner');
+        if (old) old.remove();
+        var u = BASE + 'popup.html#data=' + encodeURIComponent(JSON.stringify(d));
+        var o = document.createElement('div');
+        o.id = 'current-bookmarklet-banner';
+        o.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:1000001;background:rgb(74,159,181);padding:14px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,0.3);font-family:Arial,sans-serif';
+        var a = document.createElement('a');
+        a.href = u;
+        a.target = '_blank';
+        a.textContent = 'Click here to open The Current in a new tab';
+        a.style.cssText = 'color:white;font-size:16px;font-weight:bold;text-decoration:underline';
+        var b = document.createElement('button');
+        b.textContent = '✕';
+        b.style.cssText = 'background:none;border:none;color:white;font-size:20px;cursor:pointer;margin-left:16px;vertical-align:middle';
+        b.addEventListener('click', function() { o.remove(); });
+        o.appendChild(a);
+        o.appendChild(b);
+        document.body.appendChild(o);
+      }
+
+      function text(el) {
+        return el && el.textContent ? el.textContent.trim() : '';
+      }
+
+      function meta(selector) {
+        var m = document.querySelector(selector);
+        return m && m.content ? m.content.trim() : '';
+      }
+
+      function isUrl(s) {
+        return /^https?:\/\//i.test(s) || /^www\./i.test(s);
+      }
+
+      /* Bare dates like 2026-09-30 are read as local dates so they don't show
+         as the previous day in US time zones */
+      function formatDate(raw) {
+        if (!raw) return '';
+        raw = String(raw).trim();
+        var m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        var dt = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(raw);
+        if (isNaN(dt.getTime())) return '';
+        return dt.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+      }
+
+      /* Best article entry from the page's JSON-LD structured data */
+      function getJsonLd() {
+        var items = [];
+        var scripts = document.querySelectorAll('script[type="application/ld+json"]');
+        for (var i = 0; i < scripts.length; i++) {
+          try {
+            var data = JSON.parse(scripts[i].textContent);
+            var blocks = Array.isArray(data) ? data : [data];
+            for (var j = 0; j < blocks.length; j++) {
+              if (!blocks[j]) continue;
+              if (Array.isArray(blocks[j]['@graph'])) items = items.concat(blocks[j]['@graph']);
+              else items.push(blocks[j]);
+            }
+          } catch (e) { /* malformed JSON-LD, skip */ }
+        }
+        function hasType(item, names) {
+          var t = (item && item['@type']) || '';
+          t = Array.isArray(t) ? t : [t];
+          for (var k = 0; k < t.length; k++) if (names.indexOf(t[k]) > -1) return true;
+          return false;
+        }
+        var articleTypes = ['NewsArticle', 'Article', 'ReportageNewsArticle', 'BlogPosting'];
+        for (var i = 0; i < items.length; i++) if (hasType(items[i], articleTypes)) return items[i];
+        for (var i = 0; i < items.length; i++) if (hasType(items[i], ['WebPage'])) return items[i];
+        return null;
+      }
+
+      /* S&P Capital IQ: page layout is specific, so it has its own extraction */
+      function extractCapIQ() {
+        var h = text(document.querySelector('h1')) || document.title;
+        h = h ? h.trim() : '';
+        var au = '', date = '', sum = '';
+        var h1 = document.querySelector('h1');
+        if (h1 && h1.parentElement && h1.parentElement.children[1]) {
+          var t = h1.parentElement.children[1].textContent.trim();
+          var bi = t.indexOf('•');
+          if (bi > 0) au = t.substring(0, bi).trim();
+        }
+        var st = document.querySelectorAll('.spg-text');
+        for (var i = 0; i < st.length; i++) {
+          var dm = st[i].textContent.trim().match(/((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})/);
+          if (dm) {
+            date = formatDate(dm[1]);
+            if (date) break;
+          }
+        }
+        var ps = document.querySelectorAll('p');
+        var sp = [];
+        for (var i = 0; i < ps.length; i++) {
+          var pt = ps[i].textContent.trim();
+          if (pt.length > 80 && pt.indexOf('This article was published') === -1) {
+            sp.push(pt);
+            if (sp.length >= 2) break;
+          }
+        }
+        if (sp.length > 0) sum = sp.join(' ');
+        return { headline: h, url: location.href, publication: 'S&P Global', author: au, date: date, summary: sum };
+      }
+
+      /* Any other site: simpler version of the extraction in bookmarklet.js.
+         The new tab also looks the publication up in currentpublications.csv */
+      function extractGeneric() {
+        var ld = getJsonLd();
+
+        var headline = meta('meta[property="og:title"]').replace(/^[A-Z][A-Za-z\s]{0,20}\s*\|\s*/, '');
+        if (!headline && ld && typeof ld.headline === 'string') headline = ld.headline.trim();
+        if (!headline) headline = text(document.querySelector('article h1, main h1, [role="main"] h1'));
+        if (!headline) headline = text(document.querySelector('h1'));
+        if (!headline) headline = document.title.replace(/\s[\|\-–—]\s.+$/, '').trim();
+
+        var author = '';
+        if (ld && ld.author) {
+          var list = Array.isArray(ld.author) ? ld.author : [ld.author];
+          var names = [];
+          for (var i = 0; i < list.length; i++) {
+            var n = typeof list[i] === 'string' ? list[i] : (list[i] && list[i].name) || '';
+            n = String(n).trim().replace(/,+$/, '');
+            if (n && !isUrl(n)) names.push(n);
+          }
+          author = names.join(', ');
+        }
+        if (!author) {
+          var am = meta('meta[name="author"]');
+          if (am && !isUrl(am)) author = am;
+        }
+        if (!author) author = text(document.querySelector('[rel="author"], [class*="author-name"], [class*="authorName"]'));
+        if (author && author === author.toUpperCase() && author.length > 1) {
+          author = author.toLowerCase().replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+        }
+
+        var date = '';
+        if (ld && ld.datePublished) date = formatDate(ld.datePublished);
+        if (!date) date = formatDate(meta('meta[property="article:published_time"]'));
+        if (!date) {
+          var ip = document.querySelector('[itemprop="datePublished"]');
+          if (ip) date = formatDate(ip.getAttribute('content') || ip.getAttribute('datetime') || ip.textContent);
+        }
+        if (!date) {
+          var te = document.querySelector('article time[datetime], main time[datetime]') || document.querySelector('time[datetime]');
+          if (te) date = formatDate(te.getAttribute('datetime'));
+        }
+
+        var box = document.querySelector('[itemprop="articleBody"], article, [role="main"], main') || document.body;
+        var ps = box.querySelectorAll('p');
+        var parts = [];
+        for (var i = 0; i < ps.length; i++) {
+          if (ps[i].closest('figcaption, aside, nav, footer, figure, [class*="caption"]')) continue;
+          var pt = ps[i].textContent.trim();
+          if (pt.length < 80) continue;
+          if (/\b(newsletter|sign up|subscribe|reporting by|editing by|photo by|getty images)\b/i.test(pt)) continue;
+          parts.push(pt);
+          if (parts.length >= 2) break;
+        }
+        /* Strip wire labels ("CLIMATEWIRE | ") and datelines ("WASHINGTON (AP) —") */
+        var summary = parts.join(' ')
+          .replace(/^[A-Z][A-Z]+(?:WIRE|NEWS|ALERT)\s*[\|\-–—]\s*/i, '')
+          .replace(/^[A-Z][A-Z\s.]{1,30}(?:,\s*[A-Za-z.]+)?\s*(?:\([^)]+\)\s*)?[–—\-]\s*/, '');
+        if (!summary) summary = meta('meta[property="og:description"]') || meta('meta[name="description"]');
+
+        var publication = '';
+        if (ld && ld.publisher) {
+          var pub = ld.publisher;
+          if (typeof pub === 'string' && !isUrl(pub)) publication = pub;
+          else if (pub && typeof pub.name === 'string') publication = pub.name;
+        }
+        if (!publication) publication = meta('meta[property="og:site_name"]');
+        if (!publication) publication = location.hostname.replace(/^www\./, '');
+        publication = publication.replace(/,+/g, '').trim();
+
+        /* Strip a trailing site name from the headline ("Headline | Utility Dive") */
+        var sm = headline.match(/^(.+)\s+[\|\-–—]{1,2}\s+([^|–—]+)$/);
+        if (sm) {
+          var suffix = sm[2].trim().toLowerCase();
+          var pubLower = publication.toLowerCase();
+          var site = location.hostname.replace(/^www\./, '').split('.')[0];
+          if (pubLower.indexOf(suffix) > -1 || suffix.indexOf(pubLower) > -1 || suffix.replace(/\s/g, '').indexOf(site) > -1) {
+            headline = sm[1].trim();
+          }
+        }
+
+        return { headline: headline, url: location.href, publication: publication, author: author, date: date, summary: summary };
+      }
+
+      /* Used when bookmarklet.js can't load on this page */
+      function fallback() {
+        if (done || window.__currentBookmarkletLoaded) return;
+        done = true;
+        try {
+          showBanner(extractGeneric());
+        } catch (e) {
+          alert('The Current: ' + e.message);
+        }
+      }
+
+      if (location.hostname.indexOf('capitaliq.spglobal.com') > -1) {
+        try {
+          showBanner(extractCapIQ());
+        } catch (e) {
+          alert('The Current: ' + e.message);
+        }
+        return;
+      }
+
+      /* Normal path: load the full side panel. If the site blocks it, the
+         script reports an error (or never runs) and the banner is shown */
+      window.__currentBookmarkletLoaded = false;
+      var s = document.createElement('script');
+      s.src = BASE + 'bookmarklet.js';
+      s.onerror = fallback;
+      (document.head || document.documentElement).appendChild(s);
+      setTimeout(fallback, SCRIPT_TIMEOUT_MS);
+    }
+
+    // Leading indentation is dropped to keep the bookmark short
+    var bookmarkCode = '(' + currentBookmark.toString().replace(/^[ \t]+/gm, '') + ')()';
+    document.getElementById('bookmarklet-link').href =
+      'javascript:void(' + encodeURIComponent(bookmarkCode) + ')';
+  </script>
 </body>
 </html>

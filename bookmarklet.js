@@ -7,44 +7,29 @@
   // Signal that the script executed successfully (used by CSP fallback detection)
   window.__currentBookmarkletLoaded = true;
 
+  // If this script loaded slowly and the bookmark already showed its
+  // "open in a new tab" banner, remove it — the side panel is opening instead
+  const earlyBanner = document.getElementById('current-bookmarklet-banner');
+  if (earlyBanner) earlyBanner.remove();
+
   // Check if popup already exists
   if (document.getElementById('current-bookmarklet-popup')) {
     console.log('Popup already open');
     return;
   }
   
-  // Google Analytics tracking function
-  function trackEvent(eventName, parameters = {}) {
-    try {
-      // Load Google Analytics if not already loaded
-      if (typeof gtag === 'undefined') {
-        const script = document.createElement('script');
-        script.src = 'https://www.googletagmanager.com/gtag/js?id=G-WMSPQVX00W';
-        document.head.appendChild(script);
-        
-        window.dataLayer = window.dataLayer || [];
-        window.gtag = function(){dataLayer.push(arguments);};
-        gtag('js', new Date());
-        gtag('config', 'G-WMSPQVX00W');
-      }
-      
-      // Track the event
-      gtag('event', eventName, {
-        event_category: 'Bookmarklet',
-        event_label: window.location.hostname,
-        ...parameters
-      });
-    } catch (error) {
-      console.warn('Analytics tracking failed:', error);
-    }
-  }
-  
-  // Track bookmarklet usage
-  trackEvent('bookmarklet_opened', {
-    page_url: window.location.href,
-    page_title: document.title
-  });
-  
+  // Where popup.html and the CSV live — taken from wherever this script was
+  // loaded from, so a local copy can be tested without touching the live site
+  const SCRIPT_SRC = (document.currentScript && document.currentScript.src) || '';
+  const BASE_URL = SCRIPT_SRC
+    ? SCRIPT_SRC.substring(0, SCRIPT_SRC.lastIndexOf('/') + 1)
+    : 'https://james-schlodder.github.io/current-bookmarklet/';
+  const BASE_ORIGIN = new URL(BASE_URL).origin;
+
+  // If the side panel hasn't checked in after this long, offer the new-tab link
+  // (some sites allow this script but block the panel from loading)
+  const PANEL_TIMEOUT_MS = 6000;
+
   // Create container (no dimming background)
   const container = document.createElement('div');
   container.id = 'current-bookmarklet-popup';
@@ -82,11 +67,11 @@
     }
   `;
   document.head.appendChild(style);
-  iframe.src = 'https://james-schlodder.github.io/current-bookmarklet/popup.html';
+  iframe.src = BASE_URL + 'popup.html';
   
   // Add close button
   const closeBtn = document.createElement('button');
-  closeBtn.innerHTML = '✕';
+  closeBtn.textContent = '✕';
   closeBtn.style.cssText = `
     position: absolute;
     top: 20px;
@@ -108,32 +93,86 @@
   closeBtn.addEventListener('mouseout', function() {
     this.style.background = 'white';
   });
-  closeBtn.addEventListener('click', function() {
-    document.body.removeChild(container);
-  });
+  closeBtn.addEventListener('click', closePanel);
   
   container.appendChild(iframe);
   container.appendChild(closeBtn);
   document.body.appendChild(container);
+
+  let panelCheckedIn = false;
+  let banner = null;
+
+  // Remove everything this script added to the page
+  function closePanel() {
+    clearTimeout(panelTimer);
+    window.removeEventListener('message', onMessage);
+    container.remove();
+    style.remove();
+    removeBanner();
+  }
   
   // Listen for messages from iframe to get page data
-  window.addEventListener('message', function(event) {
-    // Verify origin
-    if (event.origin !== 'https://james-schlodder.github.io') {
+  function onMessage(event) {
+    // Only respond to our own panel
+    if (event.origin !== BASE_ORIGIN || event.source !== iframe.contentWindow) {
       return;
     }
     
-    if (event.data.action === 'extractPage') {
+    if (event.data && event.data.action === 'extractPage') {
+      panelCheckedIn = true;
+      clearTimeout(panelTimer);
+      removeBanner();
+
       // Extract page data (now async)
       extractPageData().then(pageData => {
         // Send back to iframe
         iframe.contentWindow.postMessage({
           action: 'pageData',
           data: pageData
-        }, 'https://james-schlodder.github.io');
+        }, BASE_ORIGIN);
       });
     }
-  });
+  }
+  window.addEventListener('message', onMessage);
+
+  // Panel never checked in — show a banner linking to The Current in a new tab
+  // with the extracted data. The panel is left in place in case it's just slow;
+  // if it checks in later the banner is removed.
+  const panelTimer = setTimeout(function() {
+    if (panelCheckedIn) return;
+    extractPageData().then(function(pageData) {
+      if (!panelCheckedIn && container.isConnected) showNewTabBanner(pageData);
+    });
+  }, PANEL_TIMEOUT_MS);
+
+  // Same banner the bookmark itself shows on sites that block this script
+  function showNewTabBanner(pageData) {
+    removeBanner();
+    const link = BASE_URL + 'popup.html#data=' + encodeURIComponent(JSON.stringify(pageData));
+    banner = document.createElement('div');
+    banner.id = 'current-bookmarklet-banner';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:1000001;background:rgb(74,159,181);padding:14px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,0.3);font-family:Arial,sans-serif';
+    const a = document.createElement('a');
+    a.href = link;
+    a.target = '_blank';
+    a.textContent = 'Click here to open The Current in a new tab';
+    a.style.cssText = 'color:white;font-size:16px;font-weight:bold;text-decoration:underline';
+    a.addEventListener('click', function() { setTimeout(closePanel, 0); });
+    const x = document.createElement('button');
+    x.textContent = '✕';
+    x.style.cssText = 'background:none;border:none;color:white;font-size:20px;cursor:pointer;margin-left:16px;vertical-align:middle';
+    x.addEventListener('click', closePanel);
+    banner.appendChild(a);
+    banner.appendChild(x);
+    document.body.appendChild(banner);
+  }
+
+  function removeBanner() {
+    if (banner) {
+      banner.remove();
+      banner = null;
+    }
+  }
   
   // Publication mappings - loaded from CSV
   let publicationMappings = {};
@@ -141,7 +180,7 @@
   // Function to load publication mappings from CSV
   async function loadPublicationMappings() {
     try {
-      const response = await fetch('https://james-schlodder.github.io/current-bookmarklet/currentpublications.csv');
+      const response = await fetch(BASE_URL + 'currentpublications.csv');
       const csvText = await response.text();
       
       const lines = csvText.trim().split('\n');
@@ -170,32 +209,48 @@
     }
   }
 
-  // Parse all JSON-LD blocks on the page, returning the first NewsArticle/Article/ReportageNewsArticle
+  // Parse all JSON-LD blocks on the page and return the best article entry.
+  // Article types are preferred; a generic WebPage entry is only used if no
+  // article entry exists (WebPage often appears first but lacks author/date).
   function getJsonLd() {
+    const ARTICLE_TYPES = ['NewsArticle', 'Article', 'ReportageNewsArticle', 'BlogPosting'];
+    const items = [];
     const scripts = document.querySelectorAll('script[type="application/ld+json"]');
     for (const script of scripts) {
       try {
         const data = JSON.parse(script.textContent);
-        // Handle both single objects and @graph arrays
-        const items = data['@graph'] ? data['@graph'] : [data];
-        for (const item of items) {
-          const type = item['@type'] || '';
-          const types = Array.isArray(type) ? type : [type];
-          if (types.some(t => ['NewsArticle', 'Article', 'ReportageNewsArticle', 'BlogPosting', 'WebPage'].includes(t))) {
-            return item;
-          }
+        // Handle single objects, top-level arrays, and @graph arrays
+        const blocks = Array.isArray(data) ? data : [data];
+        for (const block of blocks) {
+          if (!block) continue;
+          if (Array.isArray(block['@graph'])) items.push(...block['@graph']);
+          else items.push(block);
         }
       } catch (e) {
         // Malformed JSON-LD — skip
       }
     }
-    return null;
+
+    function typesOf(item) {
+      const type = (item && item['@type']) || '';
+      return Array.isArray(type) ? type : [type];
+    }
+
+    return items.find(item => typesOf(item).some(t => ARTICLE_TYPES.includes(t)))
+        || items.find(item => typesOf(item).includes('WebPage'))
+        || null;
   }
 
   // Safely format a date string — returns empty string if invalid
   function formatDate(rawDate) {
     if (!rawDate) return '';
-    const d = new Date(rawDate);
+    rawDate = String(rawDate).trim();
+    // A bare date like "2026-09-30" would be read as midnight UTC, which shows
+    // as the previous day in US time zones — read it as a local date instead
+    const dateOnly = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const d = dateOnly
+      ? new Date(+dateOnly[1], +dateOnly[2] - 1, +dateOnly[3])
+      : new Date(rawDate);
     if (isNaN(d.getTime())) return '';
     return d.toLocaleDateString('en-US', { 
       month: 'short', 
@@ -379,7 +434,7 @@
       headline = ogTitle.content.trim().replace(/^[A-Z][A-Za-z\s]{0,20}\s*\|\s*/, '');
     }
 
-    if (!headline && jsonLd && jsonLd.headline) {
+    if (!headline && jsonLd && typeof jsonLd.headline === 'string') {
       headline = jsonLd.headline.trim();
     }
 

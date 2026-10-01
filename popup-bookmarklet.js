@@ -44,28 +44,10 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   // ---------------------------------------------------------------------------
-  // Analytics tracking function
-  // ---------------------------------------------------------------------------
-  function trackEvent(eventName, parameters = {}) {
-    try {
-      if (window.parent && window.parent.gtag) {
-        window.parent.gtag('event', eventName, {
-          event_category: 'Bookmarklet',
-          ...parameters
-        });
-      }
-    } catch (error) {
-      console.warn('Analytics tracking failed:', error);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
   // Auto-extract on load
   // If opened in a new tab with hash data (CSP fallback), use that directly.
   // Otherwise, request page data from parent iframe as normal.
   // ---------------------------------------------------------------------------
-  trackEvent('data_extraction_started');
-
   var hashData = null;
   if (window.location.hash && window.location.hash.startsWith('#data=')) {
     try {
@@ -77,7 +59,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   if (hashData) {
     // CSP fallback mode — pre-fill from URL hash data
-    headlineInput.value    = sanitizeText(hashData.headline    || '');
+    headlineInput.value    = titleCase(sanitizeText(hashData.headline    || ''));
     urlInput.value         = sanitizeText(hashData.url         || '');
     publicationInput.value = sanitizeText(hashData.publication || '');
     authorInput.value      = sanitizeText(hashData.author      || '');
@@ -144,10 +126,12 @@ document.addEventListener('DOMContentLoaded', function() {
   // Sanitize all fields silently before populating
   // ---------------------------------------------------------------------------
   window.addEventListener('message', function(event) {
-    if (event.data.action === 'pageData') {
+    // Only accept data from the page that opened this panel
+    if (event.source !== window.parent || window.parent === window) return;
+    if (event.data && event.data.action === 'pageData') {
       const data = event.data.data;
 
-      headlineInput.value    = sanitizeText(data.headline    || '');
+      headlineInput.value    = titleCase(sanitizeText(data.headline    || ''));
       urlInput.value         = sanitizeText(data.url         || '');
       publicationInput.value = sanitizeText(data.publication || '');
       authorInput.value      = sanitizeText(data.author      || '');
@@ -190,13 +174,6 @@ document.addEventListener('DOMContentLoaded', function() {
   copyBtn.addEventListener('click', function() {
     const htmlCode = output.textContent;
     
-    trackEvent('html_copied', {
-      publication: publicationInput.value,
-      has_author: !!authorInput.value,
-      has_date: !!dateInput.value,
-      has_summary: !!summaryInput.value
-    });
-    
     // Use a temporary textarea to copy (works inside iframes)
     const textarea = document.createElement('textarea');
     textarea.value = htmlCode;
@@ -225,7 +202,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // sanitizeText() applied here as a final safety net
   // ---------------------------------------------------------------------------
   function generateHTML() {
-    const headline    = sanitizeText(headlineInput.value.trim());
+    const headline    = titleCase(sanitizeText(headlineInput.value.trim()));
     const url         = sanitizeText(urlInput.value.trim());
     const publication = sanitizeText(publicationInput.value.trim());
     const author      = sanitizeText(authorInput.value.trim());
@@ -242,7 +219,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Headline section
     if (headline) {
-      html += '<div><span style="font-size:16px;"><span style="font-family:Arial,sans-serif;"><font style="text-transform: capitalize;"><b>';
+      html += '<div><span style="font-size:16px;"><span style="font-family:Arial,sans-serif;"><font><b>';
       if (url) {
         html += '<a href="' + escapeHtml(url) + '" style="text-decoration: underline;">' + escapeHtml(headline) + '</a>';
       } else {
@@ -287,6 +264,52 @@ document.addEventListener('DOMContentLoaded', function() {
     copyBtn.disabled = false;
   }
   
+  // ---------------------------------------------------------------------------
+  // Title case (client requirement)
+  // Capitalizes each word except short articles/conjunctions/prepositions in
+  // the middle of a headline. Words that already contain capitals after the
+  // first letter (EPA, FERC, iPhone, McDonald's) are left exactly as written.
+  // Headlines published in ALL CAPS are lowered first so they can be cased.
+  // ---------------------------------------------------------------------------
+  function titleCase(text) {
+    if (!text) return text;
+
+    const SMALL_WORDS = ['a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'in',
+      'nor', 'of', 'off', 'on', 'or', 'per', 'so', 'the', 'to', 'up', 'via', 'vs',
+      'yet'];
+
+    const letters = text.replace(/[^A-Za-z]/g, '');
+    if (letters.length > 3 && letters === letters.toUpperCase()) {
+      text = text.toLowerCase();
+    }
+
+    const words = text.split(/(\s+)/);
+    const lastIndex = words.length - 1 - (words[words.length - 1].trim() ? 0 : 1);
+    let startOfPhrase = true;
+
+    return words.map(function(word, i) {
+      if (!word.trim()) return word;
+
+      const isFirstOrLast = startOfPhrase || i === lastIndex;
+      // Next word starts a new phrase after a colon, dash or question mark
+      startOfPhrase = /[:–—?!]$/.test(word) || /^[–—-]+$/.test(word);
+
+      // Handle hyphenated words part by part (e.g. "long-term" -> "Long-Term")
+      return word.split('-').map(function(part, j) {
+        const core = part.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+        if (!core) return part;
+        // Leave words with capitals beyond the first letter alone
+        if (/[A-Z]/.test(core.slice(1))) return part;
+        // Leave URLs/domains alone (e.g. "Amazon.com")
+        if (/\.[a-z]/i.test(core)) return part;
+        if (j === 0 && !isFirstOrLast && SMALL_WORDS.indexOf(core.toLowerCase()) !== -1) {
+          return part.toLowerCase();
+        }
+        return part.replace(/[A-Za-z]/, function(c) { return c.toUpperCase(); });
+      }).join('-');
+    }).join('');
+  }
+
   function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
