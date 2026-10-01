@@ -395,7 +395,9 @@
       '.article-body', '.story-body', '.post-content',
       '.entry-content', '.article-content'
     ];
-    const excludeSelectors = 'figcaption, aside, nav, footer, figure, .related, .newsletter, .ad, .sidebar, .comment, .social-share, [role="complementary"], [class*="author-bio"], [class*="vf-comment"], [class*="vf-content"], [class*="Carousel"], [class*="carousel"], [class*="caption"], [class*="photo-credit"], [class*="image-credit"], [class*="media-credit"]';
+    const excludeSelectors = 'figcaption, aside, nav, footer, figure, .related, .newsletter, .ad, .sidebar, .comment, .social-share, [role="complementary"], [class*="author-bio"], [class*="vf-comment"], [class*="vf-content"], [class*="Carousel"], [class*="carousel"], [class*="caption"], [class*="photo-credit"], [class*="image-credit"], [class*="media-credit"], ' +
+      // WSJ: AI "Quick Summary" box sits in an inset/accordion above the first paragraph
+      '[data-type="inset"], [data-testid="accordion-content"]';
 
     for (const selector of containerSelectors) {
       const container = document.querySelector(selector);
