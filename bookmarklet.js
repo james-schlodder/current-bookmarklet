@@ -387,7 +387,14 @@
 
   // Scrape the first substantial paragraphs from the article body
   function extractArticleText() {
+    // Site checks — wsj.com / nytimes.com and their subdomains only
+    const isWSJ = /(^|\.)wsj\.com$/i.test(window.location.hostname);
+    const isNYT = /(^|\.)nytimes\.com$/i.test(window.location.hostname);
+
     const containerSelectors = [
+      // NYT only: the article body section, so the sub-headline in the
+      // article header (p#article-summary) isn't picked up
+      ...(isNYT ? ['section[name="articleBody"]'] : []),
       '[itemprop="articleBody"]',
       'article',
       '[role="main"]',
@@ -395,11 +402,11 @@
       '.article-body', '.story-body', '.post-content',
       '.entry-content', '.article-content'
     ];
-    // wsj.com and its subdomains (www.wsj.com, etc.) only
-    const isWSJ = /(^|\.)wsj\.com$/i.test(window.location.hostname);
     const excludeSelectors = 'figcaption, aside, nav, footer, figure, .related, .newsletter, .ad, .sidebar, .comment, .social-share, [role="complementary"], [class*="author-bio"], [class*="vf-comment"], [class*="vf-content"], [class*="Carousel"], [class*="carousel"], [class*="caption"], [class*="photo-credit"], [class*="image-credit"], [class*="media-credit"]' +
       // WSJ only: AI "Quick Summary" box sits in an inset/accordion above the first paragraph
-      (isWSJ ? ', [data-type="inset"], [data-testid="accordion-content"]' : '');
+      (isWSJ ? ', [data-type="inset"], [data-testid="accordion-content"]' : '') +
+      // NYT only: sub-headline, in case a page has no articleBody section
+      (isNYT ? ', #article-summary' : '');
 
     for (const selector of containerSelectors) {
       const container = document.querySelector(selector);
